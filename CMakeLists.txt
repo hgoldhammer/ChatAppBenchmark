@@ -50,7 +50,7 @@ message(STATUS "CAF_INCLUDES: ${CAF_INCLUDE_DIRS}")
 include_directories(${CAF_INCLUDE_DIRS})
 # add targets for CAF benchmarks
 macro(add_caf_benchmark name)
-    add_executable(${name} ${CMAKE_CURRENT_SOURCE_DIR}/src/caf/${name}.cpp)
+    add_executable(${name} ${CMAKE_CURRENT_SOURCE_DIR}/src/${name}.cpp)
     target_link_libraries(${name} ${CAF_LIBRARIES} ${LD_FLAGS})
     add_dependencies(caf_benchmarks ${name})
 endmacro()
