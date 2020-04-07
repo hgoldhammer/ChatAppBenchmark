@@ -1,0 +1,25 @@
+# LaTeX files
+**/build/*
+*.acn
+*.aux
+*.bbl
+*.blg
+*.glo
+*.ist
+*.lof
+*.log
+*.lot
+*.out
+*.slo
+*.synctex.gz
+*.toc
+*.fdb_latexmk
+*.fls
+output/
+
+# CLion files
+.idea/
+
+# VSCode files
+.vscode/settings.json
+
