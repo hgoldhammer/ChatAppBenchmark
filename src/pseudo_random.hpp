@@ -6,25 +6,25 @@
 
 class pseudo_random {
 public:
-  pseudo_random(long seed) : value_(seed) {
+  pseudo_random(std::uint64_t seed) : value_(seed) {
     // nop
   }
 
   pseudo_random() = default;
 
-  void set_seed(long seed) {
+  void set_seed(std::uint64_t seed) {
     value_ = seed;
   }
 
-  int next_int() {
+  std::uint32_t next_int() {
     return next_long();
   }
 
-  int next_int(int exclusive_max) {
+  std::uint32_t next_int(int exclusive_max) {
     return next_long() % exclusive_max;
   }
 
-  long long next_long() {
+  std::uint64_t next_long() {
     value_ = ((value_ * 1309) + 13849) & 65535;
     return value_;
   }
@@ -58,7 +58,7 @@ public:
   }
 
 private:
-  long value_ = 74755;
+  std::uint64_t value_ = 74755;
   double next_next_gaussian = 0;
   bool have_next_next_gaussian = false;
 };
