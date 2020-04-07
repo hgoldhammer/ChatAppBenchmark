@@ -33,6 +33,9 @@ using login_atom = caf::atom_constant<caf::atom("login")>;
 using finished_atom = caf::atom_constant<caf::atom("finished")>;
 using poke_atom = caf::atom_constant<caf::atom("poke")>;
 using disconnect_atom = caf::atom_constant<caf::atom("disconnect")>;
+using confirm_atom = caf::atom_constant<caf::atom("confirm")>;
+using print_atom = caf::atom_constant<caf::atom("print")>;
+using collect_atom = caf::atom_constant<caf::atom("collect")>;
 
 /// simulates extern client events for each turn
 struct behavior_factory {
@@ -294,6 +297,45 @@ caf::behavior directory(caf::stateful_actor<directory_state>* self,
       for (auto& client : s.clients) {
         self->send(client.second, logout_atom::value);
       }
+    },
+  };
+}
+
+using time_point = std::chrono::time_point<std::chrono::high_resolution_clock>;
+struct accumulator_state {
+  caf::actor poker;
+  time_point start;
+  time_point end;
+  std::chrono::milliseconds duration;
+  size_t expected;
+  bool did_stop = false;
+};
+
+caf::behavior accumulator(caf::stateful_actor<accumulator_state>* self,
+                          caf::actor& poker, size_t expected) {
+  auto& s = self->state;
+  s.poker = poker;
+  s.start = std::chrono::high_resolution_clock::now();
+  s.expected = expected;
+  return {
+    [=](bump_atom, const size_t expected) {
+      auto& s = self->state;
+      s.expected = (s.expected + expected) - 1;
+    },
+    [=](stop_atom) {
+      auto& s = self->state;
+      s.expected--;
+      if (s.expected == 1) {
+        s.end = std::chrono::high_resolution_clock::now();
+        s.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+          s.end - s.start);
+        s.did_stop = true;
+
+        self->send(s.poker, confirm_atom::value);
+      }
+    },
+    [=](print_atom, const caf::actor& poker, size_t i, size_t j) {
+      self->send(poker, collect_atom::value, i, j, self->state.duration);
     },
   };
 }
