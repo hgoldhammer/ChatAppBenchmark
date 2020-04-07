@@ -1,6 +1,6 @@
 #pragma once
 
-#import "pseudo_random.hpp"
+#include "pseudo_random.hpp"
 
 class dice_roll {
 public:

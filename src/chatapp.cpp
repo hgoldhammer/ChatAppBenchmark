@@ -29,6 +29,10 @@ using befriend_atom = caf::atom_constant<caf::atom("befriend")>;
 using logout_atom = caf::atom_constant<caf::atom("logout")>;
 using invite_atom = caf::atom_constant<caf::atom("invite")>;
 using act_atom = caf::atom_constant<caf::atom("act")>;
+using login_atom = caf::atom_constant<caf::atom("login")>;
+using finished_atom = caf::atom_constant<caf::atom("finished")>;
+using poke_atom = caf::atom_constant<caf::atom("poke")>;
+using disconnect_atom = caf::atom_constant<caf::atom("disconnect")>;
 
 /// simulates extern client events for each turn
 struct behavior_factory {
@@ -145,7 +149,7 @@ struct client_state {
   std::uint64_t id;
   friend_set friends;
   chat_set chats;
-  caf::actor& directory;
+  caf::actor directory;
   dice_roll dice;
   pseudo_random rand;
 };
@@ -237,6 +241,58 @@ caf::behavior client(caf::stateful_actor<client_state>* self,
             }
           }
           break;
+      }
+    },
+  };
+}
+
+struct directory_state {
+  client_map clients;
+  pseudo_random random;
+  std::uint32_t befriend;
+  bool is_poker = false;
+  caf::actor poker;
+};
+
+caf::behavior directory(caf::stateful_actor<directory_state>* self,
+                        std::uint64_t seed, std::uint32_t befriend) {
+  auto& s = self->state;
+  s.random = pseudo_random(seed);
+  s.befriend = befriend;
+  return {
+    [=](login_atom, std::uint64_t id) {
+      auto& s = self->state;
+      auto new_client = self->spawn(client, id, self, s.random.next_int());
+      s.clients.emplace(id, new_client);
+      for (auto& client : s.clients) {
+        if (s.random.next_int(100) < s.befriend) {
+          self->send(client.second, befriend_atom::value, new_client);
+          self->send(new_client, befriend_atom::value, client.second);
+        }
+      }
+    },
+    [=](login_atom, std::uint64_t id) {
+      self->send(self->state.clients.at(id), logout_atom::value);
+    },
+    [=](left_atom, std::uint64_t id) {
+      auto& s = self->state;
+      s.clients.erase(id);
+      if (s.clients.empty() && s.is_poker) {
+        self->send(s.poker, finished_atom::value);
+      }
+    },
+    [=](poke_atom, behavior_factory& behavior, const caf::actor& accumulator) {
+      for (auto& client : self->state.clients) {
+        self->send(client.second, act_atom::value, behavior, accumulator);
+      }
+    },
+    [=](disconnect_atom, caf::actor& poker) {
+      auto& s = self->state;
+      s.is_poker = true;
+      s.poker = poker;
+
+      for (auto& client : s.clients) {
+        self->send(client.second, logout_atom::value);
       }
     },
   };
