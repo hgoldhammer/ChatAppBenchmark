@@ -5,6 +5,8 @@
 
 // util
 #include "dice_roll.hpp"
+#include "pseudo_random.hpp"
+#include "stats.hpp"
 
 // caf
 #include "caf/all.hpp"
