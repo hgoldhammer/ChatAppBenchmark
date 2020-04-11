@@ -4,6 +4,10 @@
 
 class dice_roll {
 public:
+  dice_roll() : random_(42) {
+    //nop
+  };
+
   dice_roll(std::uint64_t seed) : random_(seed) {
     //nop
   }
