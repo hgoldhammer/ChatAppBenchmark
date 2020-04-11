@@ -348,3 +348,169 @@ caf::behavior accumulator(caf::stateful_actor<accumulator_state>* self,
     },
   };
 }
+
+struct poker_state {
+  std::uint64_t clients;
+  std::size_t logouts;
+  std::size_t confirmations;
+  std::uint64_t turns;
+  std::size_t iteration;
+  std::vector<caf::actor> directories;
+  std::vector<caf::actor> runtimes;
+  std::size_t accumulations;
+  std::vector<std::vector<double>> finals;
+  behavior_factory factory;
+  caf::actor bench;
+  bool last;
+  std::vector<double> turn_series;
+};
+
+caf::behavior poker(caf::stateful_actor<poker_state>* self,
+                    std::uint64_t clients, std::uint64_t turns,
+                    std::vector<caf::actor>& directories,
+                    behavior_factory& factory) {
+  auto& s = self->state;
+  s.clients = clients;
+  s.turns = turns;
+  s.directories = directories;
+  s.factory = factory;
+  return {
+    [=](apply_atom, caf::actor& bench, bool last) {
+      auto& s = self->state;
+      s.confirmations = s.turns;
+      s.logouts = s.directories.size();
+      s.bench = bench;
+      s.last = last;
+      s.accumulations = 0;
+
+      std::uint64_t turns = s.turns;
+      std::size_t index = 0;
+      std::vector<double> values;
+      values.reserve(s.turns);
+      s.finals.push_back(values);
+
+      for (size_t client = 0; client < s.clients; ++client) {
+        index = client % s.directories.size();
+        self->send(s.directories.at(index), login_atom::value, client);
+      }
+      // feetback loop?
+      for (; turns >= 0; --turns) {
+        auto accu = self->spawn(accumulator, self, s.clients);
+        for (auto& directory : s.directories) {
+          self->send(directory, poke_atom::value, s.factory, accu);
+        }
+
+        s.runtimes.push_back(accu);
+      }
+    },
+    [=](confirm_atom) {
+      auto& s = self->state;
+      --s.confirmations;
+      if (s.confirmations == 1) {
+        for (auto& d : s.directories) {
+          self->send(d, disconnect_atom::value, self);
+        }
+      }
+    },
+    [=](finished_atom) {
+      auto& s = self->state;
+      --s.logouts;
+      if (s.logouts == 1) {
+        std::size_t turn = 0;
+
+        for (auto& accumulator : s.runtimes) {
+          ++s.accumulations;
+          self->send(accumulator, print_atom::value, self, s.iteration, turn);
+          ++turn;
+        }
+
+        s.runtimes.clear();
+      }
+    },
+    [=](collect_atom, std::size_t i, std::size_t j, double duration) {
+      auto& s = self->state;
+      s.finals[i][j] = duration;
+      s.turn_series.push_back(duration);
+
+      --s.accumulations;
+      if (s.accumulations == 1) {
+        ++s.iteration;
+        self->send(s.bench, complete_atom::value);
+
+        if (s.last) {
+          sample_stats stats(s.turn_series);
+          std::vector<std::vector<double>> turns;
+          std::vector<double> qos;
+
+          // TODO ask pony about line 381 to 391
+
+          for (std::size_t l = 0; l < s.finals.size(); ++l) {
+            qos.push_back(sample_stats(s.finals.back()).stddev());
+            s.finals.pop_back();
+          }
+
+          std::stringstream title_text;
+          title_text << std::string(31, ' ') << std::string(12, ' ') << "j-mean"
+                     << std::string(10, ' ') << "j-median"
+                     << std::string(11, ' ') << "j-error"
+                     << std::string(10, ' ') << "j-stddev"
+                     << std::string(14, ' ') << "quality of service"
+                     << std::endl;
+
+          self->send(s.bench, append_atom::value, title_text.str());
+
+          std::stringstream result_text;
+          result_text
+            << "Turns" << std::string(27, ' ') << std::setw(18)
+            << std::setprecision(std::numeric_limits<double>::digits10)
+            << stats.mean() << " " << std::setw(18)
+            << std::setprecision(std::numeric_limits<double>::digits10)
+            << stats.median() << " " << std::setw(18)
+            << std::setprecision(std::numeric_limits<double>::digits10)
+            << stats.err() << " " << std::setw(18)
+            << std::setprecision(std::numeric_limits<double>::digits10)
+            << stats.stddev() << " " << std::setw(18)
+            << std::setprecision(std::numeric_limits<double>::digits10)
+            << sample_stats(qos).median() << std::endl;
+
+          self->send(s.bench, append_atom::value, result_text.str());
+        }
+      }
+    },
+  };
+}
+
+struct chatapp_state {
+  std::uint64_t clients;
+  std::uint64_t turns;
+  std::vector<caf::actor> directories;
+  behavior_factory factory;
+  caf::actor poker;
+};
+
+caf::behavior chatapp(caf::stateful_actor<chatapp_state>* self) {
+  auto& s = self->state;
+  s.clients = 1024;
+  s.turns = 20;
+
+  std::size_t directories = 8;
+  std::uint64_t compute = 50;
+  std::uint64_t post = 80;
+  std::uint64_t leave = 25;
+  std::uint64_t invite = 25;
+  std::uint64_t befriend = 10;
+  pseudo_random rand(42);
+
+  s.factory = behavior_factory(compute, post, leave, invite);
+
+  for (std::size_t i = 0; i < directories; ++i) {
+    s.directories.emplace_back(
+      self->spawn(directory, rand.next_int(), befriend));
+  }
+
+  s.poker = self->spawn(poker, s.clients, s.turns, s.directories, s.factory);
+
+  return {[=](apply_atom, caf::actor& async_benchmark_completion, bool last) {
+    self->send(self->state.poker, async_benchmark_completion, last);
+  }};
+}
