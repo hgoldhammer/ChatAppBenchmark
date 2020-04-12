@@ -367,8 +367,8 @@ struct poker_state {
 
 caf::behavior poker(caf::stateful_actor<poker_state>* self,
                     std::uint64_t clients, std::uint64_t turns,
-                    std::vector<caf::actor>& directories,
-                    behavior_factory& factory) {
+                    std::vector<caf::actor> directories,
+                    behavior_factory factory) {
   auto& s = self->state;
   s.clients = clients;
   s.turns = turns;
@@ -510,7 +510,9 @@ caf::behavior chatapp(caf::stateful_actor<chatapp_state>* self) {
 
   s.poker = self->spawn(poker, s.clients, s.turns, s.directories, s.factory);
 
-  return {[=](apply_atom, caf::actor& async_benchmark_completion, bool last) {
-    self->send(self->state.poker, async_benchmark_completion, last);
-  }};
+  return {
+    [=](apply_atom, caf::actor& async_benchmark_completion, bool last) {
+      self->send(self->state.poker, async_benchmark_completion, last);
+    },
+  };
 }
