@@ -10,6 +10,7 @@
 
 // caf
 #include "caf/all.hpp"
+#include "caf/io/middleman.hpp"
 
 // types
 using client_map = std::unordered_map<std::uint64_t, caf::actor>;
@@ -103,8 +104,12 @@ std::uint64_t fibonacci(std::uint8_t x) {
 }
 
 struct chat_state {
+  chat_state() : name("chat") {
+    // nop
+  }
   client_set members;
   std::vector<std::vector<std::uint8_t>> buffer;
+  const char* name;
 };
 
 caf::behavior chat(caf::stateful_actor<chat_state>* self,
@@ -137,7 +142,7 @@ caf::behavior chat(caf::stateful_actor<chat_state>* self,
       } else {
         self->send(accumulator, bump_atom::value, s.buffer.size());
         for (auto& message : s.buffer) {
-          self->send(client, forward_atom::value, message, accumulator);
+          self->send(client, forward_atom::value, self, message, accumulator);
         }
       }
 #endif
@@ -155,12 +160,16 @@ caf::behavior chat(caf::stateful_actor<chat_state>* self,
 }
 
 struct client_state {
+  client_state() : name("client") {
+    // nop
+  }
   std::uint64_t id;
   friend_set friends;
   chat_set chats;
   caf::actor directory;
   dice_roll dice;
   pseudo_random rand;
+  const char* name;
 };
 
 caf::behavior client(caf::stateful_actor<client_state>* self,
@@ -191,8 +200,7 @@ caf::behavior client(caf::stateful_actor<client_state>* self,
       s.chats.erase(chat);
       self->send(accumulator, stop_atom::value);
     },
-    [=](left_atom, const caf::actor& chat, const bool did_logout,
-        const caf::actor& accumulator) {
+    [=](left_atom, const caf::actor& chat, const bool did_logout) {
       auto& s = self->state;
       s.chats.erase(chat);
       if (did_logout && s.chats.empty()) {
@@ -223,7 +231,7 @@ caf::behavior client(caf::stateful_actor<client_state>* self,
                      accumulator);
           break;
         case action::leave:
-          self->send(next_chat, leave_atom::value, false, accumulator);
+          self->send(next_chat, leave_atom::value, self, false, accumulator);
           break;
         case action::compute:
           fibonacci(35);
@@ -257,11 +265,15 @@ caf::behavior client(caf::stateful_actor<client_state>* self,
 }
 
 struct directory_state {
+  directory_state() : name("directory") {
+    // nop
+  }
   client_map clients;
   pseudo_random random;
   std::uint32_t befriend;
   bool is_poker = false;
   caf::actor poker;
+  const char* name;
 };
 
 caf::behavior directory(caf::stateful_actor<directory_state>* self,
@@ -310,6 +322,9 @@ caf::behavior directory(caf::stateful_actor<directory_state>* self,
 
 using time_point = std::chrono::time_point<std::chrono::high_resolution_clock>;
 struct accumulator_state {
+  accumulator_state() : name("accumulator") {
+    // nop
+  }
   caf::actor poker;
   time_point start;
   time_point end;
@@ -317,6 +332,7 @@ struct accumulator_state {
   double duration;
   size_t expected;
   bool did_stop = false;
+  const char* name;
 };
 
 caf::behavior accumulator(caf::stateful_actor<accumulator_state>* self,
@@ -350,10 +366,14 @@ caf::behavior accumulator(caf::stateful_actor<accumulator_state>* self,
 }
 
 struct poker_state {
+  poker_state() : name("poker") {
+    // nop
+  }
   std::uint64_t clients;
   std::size_t logouts;
   std::size_t confirmations;
   std::uint64_t turns;
+  std::uint64_t runs;
   std::size_t iteration;
   std::vector<caf::actor> directories;
   std::vector<caf::actor> runtimes;
@@ -363,17 +383,20 @@ struct poker_state {
   caf::actor bench;
   bool last;
   std::vector<double> turn_series;
+  const char* name;
 };
 
 caf::behavior poker(caf::stateful_actor<poker_state>* self,
                     std::uint64_t clients, std::uint64_t turns,
-                    std::vector<caf::actor> directories,
+                    std::uint64_t runs, std::vector<caf::actor> directories,
                     behavior_factory factory) {
   auto& s = self->state;
   s.clients = clients;
   s.turns = turns;
+  s.runs = runs;
   s.directories = directories;
   s.factory = factory;
+  s.finals.resize(s.runs, std::vector<double>(s.turns));
   return {
     [=](apply_atom, caf::actor& bench, bool last) {
       auto& s = self->state;
@@ -385,9 +408,6 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
 
       std::uint64_t turns = s.turns;
       std::size_t index = 0;
-      std::vector<double> values;
-      values.reserve(s.turns);
-      s.finals.push_back(values);
 
       for (size_t client = 0; client < s.clients; ++client) {
         index = client % s.directories.size();
@@ -429,11 +449,18 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
     },
     [=](collect_atom, std::size_t i, std::size_t j, double duration) {
       auto& s = self->state;
-      s.finals[i][j] = duration;
+      try {
+        s.finals.at(i).at(j) = duration;
+      } catch (std::exception& e) {
+        caf::aout(self) << "exception at " << i << " " << j << " "
+                        << s.finals.size() << " " << s.turn_series.size()
+                        << std::endl;
+      }
+
       s.turn_series.push_back(duration);
 
       --s.accumulations;
-      if (s.accumulations == 1) {
+      if (s.accumulations == 0) {
         ++s.iteration;
         self->send(s.bench, complete_atom::value);
 
@@ -444,9 +471,8 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
 
           // TODO ask pony about line 381 to 391
 
-          for (std::size_t l = 0; l < s.finals.size(); ++l) {
-            qos.push_back(sample_stats(s.finals.back()).stddev());
-            s.finals.pop_back();
+          for (auto& stats : s.finals) {
+            qos.push_back(sample_stats(stats).stddev());
           }
 
           std::stringstream title_text;
@@ -460,15 +486,10 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
           std::stringstream result_text;
           result_text
             << "Turns" << std::string(27, ' ') << std::setw(18)
-            << std::setprecision(std::numeric_limits<double>::digits10)
             << stats.mean() << " " << std::setw(18)
-            << std::setprecision(std::numeric_limits<double>::digits10)
             << stats.median() << " " << std::setw(18)
-            << std::setprecision(std::numeric_limits<double>::digits10)
             << stats.err() << " " << std::setw(18)
-            << std::setprecision(std::numeric_limits<double>::digits10)
             << stats.stddev() << " " << std::setw(18)
-            << std::setprecision(std::numeric_limits<double>::digits10)
             << sample_stats(qos).median() << std::endl;
 
           self->send(s.bench, append_atom::value, title_text.str(),
@@ -480,17 +501,24 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
 }
 
 struct chatapp_state {
+  chatapp_state() : name("chatapp") {
+    // nop
+  }
   std::uint64_t clients;
   std::uint64_t turns;
+  std::uint64_t run;
   std::vector<caf::actor> directories;
   behavior_factory factory;
   caf::actor poker;
+  const char* name;
 };
 
-caf::behavior chatapp(caf::stateful_actor<chatapp_state>* self) {
+caf::behavior chatapp(caf::stateful_actor<chatapp_state>* self,
+                      std::uint64_t run) {
   auto& s = self->state;
   s.clients = 1024;
   s.turns = 20;
+  s.run = run;
 
   std::size_t directories = 8;
   std::uint64_t compute = 50;
@@ -507,11 +535,13 @@ caf::behavior chatapp(caf::stateful_actor<chatapp_state>* self) {
       self->spawn(directory, rand.next_int(), befriend));
   }
 
-  s.poker = self->spawn(poker, s.clients, s.turns, s.directories, s.factory);
+  s.poker = self->spawn(poker, s.clients, s.turns, s.run, s.directories,
+                        s.factory);
 
   return {
     [=](apply_atom, caf::actor& async_benchmark_completion, bool last) {
-      self->send(self->state.poker, async_benchmark_completion, last);
+      self->send(self->state.poker, apply_atom::value,
+                 async_benchmark_completion, last);
     },
   };
 }
@@ -530,7 +560,7 @@ struct config : caf::actor_system_config {
 };
 
 void caf_main(caf::actor_system& system, const config& cfg) {
-  auto chat = system.spawn(chatapp);
+  auto chat = system.spawn(chatapp, cfg.run);
   caf::scoped_actor self{system};
   std::vector<double> durations;
   std::stringstream title_text;
@@ -551,28 +581,23 @@ void caf_main(caf::actor_system& system, const config& cfg) {
   }
   auto start = std::chrono::high_resolution_clock::now();
   self->send(chat, apply_atom::value, self, true);
-  self->receive(
-    [&](complete_atom) {
-      auto end = std::chrono::high_resolution_clock::now();
-      durations.emplace_back(
-        std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-          .count());
-    },
-    [&](append_atom, std::string& title, std::string& result) {
-      sample_stats stats(durations);
-      std::stringstream result_text;
-      result_text << "ChatApp" << std::string(24, ' ') << std::setw(18)
-                  << std::setprecision(std::numeric_limits<double>::digits10)
-                  << stats.mean() << " " << std::setw(18)
-                  << std::setprecision(std::numeric_limits<double>::digits10)
-                  << stats.median() << " " << std::setw(18)
-                  << std::setprecision(std::numeric_limits<double>::digits10)
-                  << stats.err() << " " << std::setw(18)
-                  << std::setprecision(std::numeric_limits<double>::digits10)
-                  << stats.stddev() << " " << std::setw(18) << std::endl;
-
-      std::cout << title << result;
-    });
+  self->receive([&](complete_atom) {
+    auto end = std::chrono::high_resolution_clock::now();
+    durations.emplace_back(
+      std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+        .count());
+  });
+  self->receive([&](append_atom, std::string& title, std::string& result) {
+    sample_stats stats(durations);
+    std::stringstream result_text;
+    result_text << "ChatApp" << std::string(24, ' ') << std::setw(18)
+                << stats.mean() << " " << std::setw(18)
+                << stats.median() << " " << std::setw(18)
+                << stats.err() << " " << std::setw(18)
+                << stats.stddev() << " " << std::setw(18) << std::endl;
+    std::cout << result_text.str();
+    std::cout << title << result;
+  });
 }
 
 CAF_MAIN(caf::io::middleman)
