@@ -205,6 +205,7 @@ caf::behavior client(caf::stateful_actor<client_state>* self,
       s.chats.erase(chat);
       if (did_logout && s.chats.empty()) {
         self->send(s.directory, left_atom::value, s.id);
+        self->quit(); //TODO aks pony about this
       }
     },
     [=](invite_atom, const caf::actor& chat, const caf::actor& accumulator) {
@@ -471,25 +472,26 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
 
           // TODO ask pony about line 381 to 391
 
-          for (auto& stats : s.finals) {
-            qos.push_back(sample_stats(stats).stddev());
+          for (std::size_t l = 0; l < s.finals.size(); ++l) {
+            qos.push_back(sample_stats(s.finals.back()).stddev());
+            s.finals.pop_back();
           }
 
           std::stringstream title_text;
-          title_text << std::string(31, ' ') << std::string(12, ' ') << "j-mean"
-                     << std::string(10, ' ') << "j-median"
-                     << std::string(11, ' ') << "j-error"
-                     << std::string(10, ' ') << "j-stddev"
-                     << std::string(14, ' ') << "quality of service"
+          title_text << std::string(31, ' ') << std::setw(18) << "j-mean"
+                     << std::setw(18) << "j-median"
+                     << std::setw(18) << "j-error"
+                     << std::setw(18) << "j-stddev"
+                     << std::setw(32) << "quality of service"
                      << std::endl;
 
           std::stringstream result_text;
           result_text
-            << "Turns" << std::string(27, ' ') << std::setw(18)
-            << stats.mean() << " " << std::setw(18)
-            << stats.median() << " " << std::setw(18)
-            << stats.err() << " " << std::setw(18)
-            << stats.stddev() << " " << std::setw(18)
+            << "Turns" << std::string(27, ' ') << std::setw(17)
+            << stats.mean() << " " << std::setw(17)
+            << stats.median() << " " << std::setw(17)
+            << stats.err() << " " << std::setw(17)
+            << stats.stddev() << " " << std::setw(31)
             << sample_stats(qos).median() << std::endl;
 
           self->send(s.bench, append_atom::value, title_text.str(),
@@ -564,11 +566,12 @@ void caf_main(caf::actor_system& system, const config& cfg) {
   caf::scoped_actor self{system};
   std::vector<double> durations;
   std::stringstream title_text;
-  title_text << std::string(31, ' ') << std::string(12, ' ') << "i-mean"
-             << std::string(10, ' ') << "i-median" << std::string(11, ' ')
-             << "i-error" << std::string(10, ' ') << "i-stddev" << std::endl;
+  title_text << std::string(31, ' ') << std::setw(18) << "i-mean"
+             << std::setw(18) << "i-median" << std::setw(18)
+             << "i-error" << std::setw(18) << "i-stddev" << std::endl;
   std::cout << title_text.str();
   for (int i = 0; i < cfg.run - 1; ++i) {
+    caf::aout(self) << "start" << std::endl;
     auto start = std::chrono::high_resolution_clock::now();
     self->send(chat, apply_atom::value, self, false);
     self->receive([&](complete_atom) {
@@ -590,11 +593,11 @@ void caf_main(caf::actor_system& system, const config& cfg) {
   self->receive([&](append_atom, std::string& title, std::string& result) {
     sample_stats stats(durations);
     std::stringstream result_text;
-    result_text << "ChatApp" << std::string(24, ' ') << std::setw(18)
-                << stats.mean() << " " << std::setw(18)
-                << stats.median() << " " << std::setw(18)
-                << stats.err() << " " << std::setw(18)
-                << stats.stddev() << " " << std::setw(18) << std::endl;
+    result_text << "ChatApp" << std::string(25, ' ') << std::setw(17)
+                << stats.mean() << " " << std::setw(17)
+                << stats.median() << " " << std::setw(17)
+                << stats.err() << " " << std::setw(17)
+                << stats.stddev() << " " << std::setw(17) << std::endl;
     std::cout << result_text.str();
     std::cout << title << result;
   });
