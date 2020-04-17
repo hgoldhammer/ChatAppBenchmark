@@ -462,10 +462,12 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
 
       --s.accumulations;
       if (s.accumulations == 0) {
+        caf::aout(self) << "iteration end" << std::endl;
         ++s.iteration;
         self->send(s.bench, complete_atom::value);
 
         if (s.last) {
+          caf::aout(self) << "start data collection" << std::endl;
           sample_stats stats(s.turn_series);
           std::vector<std::vector<double>> turns;
           std::vector<double> qos;
@@ -582,6 +584,7 @@ void caf_main(caf::actor_system& system, const config& cfg) {
       sample_stats stats(durations);
     });
   }
+  caf::aout(self) << "start" << std::endl;
   auto start = std::chrono::high_resolution_clock::now();
   self->send(chat, apply_atom::value, self, true);
   self->receive([&](complete_atom) {
