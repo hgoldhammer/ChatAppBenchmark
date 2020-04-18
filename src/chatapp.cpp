@@ -12,14 +12,15 @@
 #include "caf/all.hpp"
 #include "caf/io/middleman.hpp"
 
+/// clients actions
+enum action { post, leave, invite, compute, none };
+
 // types
 using client_map = std::unordered_map<std::uint64_t, caf::actor>;
 using friend_set = std::unordered_set<caf::actor>;
 using chat_set = std::unordered_set<caf::actor>;
 using client_set = std::unordered_set<caf::actor>;
-
-/// clients actions
-enum action { post, leave, invite, compute, none };
+using action_map = std::unordered_map<action, std::uint64_t>;
 
 // messages
 using post_atom = caf::atom_constant<caf::atom("post")>;
@@ -123,7 +124,7 @@ caf::behavior chat(caf::stateful_actor<chat_state>* self,
       s.buffer.push_back(payload);
 #endif
       if (s.members.empty()) {
-        self->send(accumulator, stop_atom::value);
+        self->send(accumulator, stop_atom::value, action::post);
       } else {
         self->send(accumulator, bump_atom::value, s.members.size());
         for (auto& member : s.members) {
@@ -135,10 +136,10 @@ caf::behavior chat(caf::stateful_actor<chat_state>* self,
       auto& s = self->state;
       s.members.insert(client);
 #ifdef BENCH_NO_BUFFERED_CHATS
-      self->send(accumulator, stop_atom::value);
+      self->send(accumulator, stop_atom::value, action::invite);
 #else
       if (s.buffer.empty()) {
-        self->send(accumulator, stop_atom::value);
+        self->send(accumulator, stop_atom::value, action::invite);
       } else {
         self->send(accumulator, bump_atom::value, s.buffer.size());
         for (auto& message : s.buffer) {
@@ -198,14 +199,14 @@ caf::behavior client(caf::stateful_actor<client_state>* self,
         const caf::actor& accumulator) {
       auto& s = self->state;
       s.chats.erase(chat);
-      self->send(accumulator, stop_atom::value);
+      self->send(accumulator, stop_atom::value, action::leave);
     },
     [=](left_atom, const caf::actor& chat, const bool did_logout) {
       auto& s = self->state;
       s.chats.erase(chat);
       if (did_logout && s.chats.empty()) {
         self->send(s.directory, left_atom::value, s.id);
-        self->quit(); //TODO aks pony about this
+        self->quit(); // TODO aks pony about this
       }
     },
     [=](invite_atom, const caf::actor& chat, const caf::actor& accumulator) {
@@ -214,7 +215,7 @@ caf::behavior client(caf::stateful_actor<client_state>* self,
     },
     [=](forward_atom, const caf::actor& chat,
         std::vector<std::uint8_t>& payload, const caf::actor& accumulator) {
-      self->send(accumulator, stop_atom::value);
+      self->send(accumulator, stop_atom::value, action::post);
     },
     [=](act_atom, behavior_factory& behavior, const caf::actor& accumulator) {
       auto& s = self->state;
@@ -236,10 +237,10 @@ caf::behavior client(caf::stateful_actor<client_state>* self,
           break;
         case action::compute:
           fibonacci(35);
-          self->send(accumulator, stop_atom::value);
+          self->send(accumulator, stop_atom::value, action::compute);
           break;
         case action::none:
-          self->send(accumulator, stop_atom::value);
+          self->send(accumulator, stop_atom::value, action::none);
           break;
         case action::invite:
           std::vector<caf::actor> f;
@@ -252,7 +253,7 @@ caf::behavior client(caf::stateful_actor<client_state>* self,
 
           std::size_t invitations = s.rand.next_int(s.friends.size());
           if (invitations == 0) {
-            self->send(accumulator, stop_atom::value);
+            self->send(accumulator, stop_atom::value, action::invite);
           } else {
             self->send(accumulator, bump_atom::value, invitations);
             for (size_t i = 0; i < invitations; ++i) {
@@ -327,6 +328,7 @@ struct accumulator_state {
     // nop
   }
   caf::actor poker;
+  action_map actions;
   time_point start;
   time_point end;
   /// time in milliseconds
@@ -342,13 +344,19 @@ caf::behavior accumulator(caf::stateful_actor<accumulator_state>* self,
   s.poker = poker;
   s.start = std::chrono::high_resolution_clock::now();
   s.expected = expected;
+  s.actions.emplace(action::invite, 0);
+  s.actions.emplace(action::none, 0);
+  s.actions.emplace(action::compute, 0);
+  s.actions.emplace(action::post, 0);
+  s.actions.emplace(action::leave, 0);
   return {
     [=](bump_atom, const std::size_t expected) {
       auto& s = self->state;
       s.expected = (s.expected + expected) - 1;
     },
-    [=](stop_atom) {
+    [=](stop_atom, const action act) {
       auto& s = self->state;
+      s.actions.at(act)++;
       s.expected--;
       if (s.expected == 1) {
         s.end = std::chrono::high_resolution_clock::now();
@@ -361,7 +369,8 @@ caf::behavior accumulator(caf::stateful_actor<accumulator_state>* self,
       }
     },
     [=](print_atom, const caf::actor& poker, std::size_t i, std::size_t j) {
-      self->send(poker, collect_atom::value, i, j, self->state.duration);
+      self->send(poker, collect_atom::value, i, j, self->state.duration,
+                 self->state.actions);
     },
   };
 }
@@ -370,6 +379,7 @@ struct poker_state {
   poker_state() : name("poker") {
     // nop
   }
+  action_map actions;
   std::uint64_t clients;
   std::size_t logouts;
   std::size_t confirmations;
@@ -398,6 +408,11 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
   s.directories = directories;
   s.factory = factory;
   s.finals.resize(s.runs, std::vector<double>(s.turns));
+  s.actions.emplace(action::invite, 0);
+  s.actions.emplace(action::none, 0);
+  s.actions.emplace(action::compute, 0);
+  s.actions.emplace(action::post, 0);
+  s.actions.emplace(action::leave, 0);
   return {
     [=](apply_atom, caf::actor& bench, bool last) {
       auto& s = self->state;
@@ -448,14 +463,16 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
         s.runtimes.clear();
       }
     },
-    [=](collect_atom, std::size_t i, std::size_t j, double duration) {
+    [=](collect_atom, std::size_t i, std::size_t j, double duration,
+        action_map actions) {
       auto& s = self->state;
+      for (auto& act : actions) {
+        s.actions.at(act.first) += act.second;
+      }
       try {
         s.finals.at(i).at(j) = duration;
       } catch (std::exception& e) {
-        caf::aout(self) << "exception at " << i << " " << j << " "
-                        << s.finals.size() << " " << s.turn_series.size()
-                        << std::endl;
+        caf::aout(self) << "exception at " << i << " " << j << std::endl;
       }
 
       s.turn_series.push_back(duration);
@@ -481,23 +498,28 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
 
           std::stringstream title_text;
           title_text << std::string(31, ' ') << std::setw(18) << "j-mean"
-                     << std::setw(18) << "j-median"
-                     << std::setw(18) << "j-error"
-                     << std::setw(18) << "j-stddev"
-                     << std::setw(32) << "quality of service"
-                     << std::endl;
+                     << std::setw(18) << "j-median" << std::setw(18)
+                     << "j-error" << std::setw(18) << "j-stddev"
+                     << std::setw(32) << "quality of service" << std::endl;
 
           std::stringstream result_text;
-          result_text
-            << "Turns" << std::string(27, ' ') << std::setw(17)
-            << stats.mean() << " " << std::setw(17)
-            << stats.median() << " " << std::setw(17)
-            << stats.err() << " " << std::setw(17)
-            << stats.stddev() << " " << std::setw(31)
-            << sample_stats(qos).median() << std::endl;
+          result_text << "Turns" << std::string(27, ' ') << std::setw(17)
+                      << stats.mean() << " " << std::setw(17) << stats.median()
+                      << " " << std::setw(17) << stats.err() << " "
+                      << std::setw(17) << stats.stddev() << " " << std::setw(31)
+                      << sample_stats(qos).median() << std::endl;
+
+          std::stringstream act_text;
+          act_text << std::endl
+                   << "Acts:" << std::endl
+                   << "Post: " << s.actions.at(action::post) << std::endl
+                   << "Leave: " << s.actions.at(action::leave) << std::endl
+                   << "Invite: " << s.actions.at(action::invite) << std::endl
+                   << "Compute: " << s.actions.at(action::compute) << std::endl
+                   << "None: " << s.actions.at(action::none) << std::endl;
 
           self->send(s.bench, append_atom::value, title_text.str(),
-                     result_text.str());
+                     result_text.str(), act_text.str());
         }
       }
     },
@@ -569,8 +591,8 @@ void caf_main(caf::actor_system& system, const config& cfg) {
   std::vector<double> durations;
   std::stringstream title_text;
   title_text << std::string(31, ' ') << std::setw(18) << "i-mean"
-             << std::setw(18) << "i-median" << std::setw(18)
-             << "i-error" << std::setw(18) << "i-stddev" << std::endl;
+             << std::setw(18) << "i-median" << std::setw(18) << "i-error"
+             << std::setw(18) << "i-stddev" << std::endl;
   std::cout << title_text.str();
   for (int i = 0; i < cfg.run - 1; ++i) {
     caf::aout(self) << "start" << std::endl;
@@ -593,16 +615,16 @@ void caf_main(caf::actor_system& system, const config& cfg) {
       std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
         .count());
   });
-  self->receive([&](append_atom, std::string& title, std::string& result) {
+  self->receive([&](append_atom, std::string& title, std::string& result,
+                    std::string& act) {
     sample_stats stats(durations);
     std::stringstream result_text;
     result_text << "ChatApp" << std::string(25, ' ') << std::setw(17)
-                << stats.mean() << " " << std::setw(17)
-                << stats.median() << " " << std::setw(17)
-                << stats.err() << " " << std::setw(17)
+                << stats.mean() << " " << std::setw(17) << stats.median() << " "
+                << std::setw(17) << stats.err() << " " << std::setw(17)
                 << stats.stddev() << " " << std::setw(17) << std::endl;
     std::cout << result_text.str();
-    std::cout << title << result;
+    std::cout << title << result << act;
   });
 }
 
