@@ -58,7 +58,7 @@ struct behavior_factory {
 
   behavior_factory(const behavior_factory& f) = default;
 
-  action apply(dice_roll dice) {
+  action apply(dice_roll dice) const {
     auto next_action = action::none;
 
     if (dice.apply(compute)) {
@@ -186,8 +186,9 @@ caf::behavior client(caf::stateful_actor<client_state>* self,
   auto& s = self->state;
   s.id = id;
   s.directory = directory;
-  s.dice = dice_roll(seed);
   s.rand = pseudo_random(seed);
+  s.dice = dice_roll(s.rand);
+
   return {
     [=](befriend_atom, const caf::actor& client) {
       self->state.friends.insert(client);
@@ -342,7 +343,7 @@ struct accumulator_state {
   /// time in milliseconds
   double duration;
   size_t expected;
-  bool did_stop = false;
+  bool did_stop;
   const char* name;
 };
 
@@ -352,6 +353,7 @@ caf::behavior accumulator(caf::stateful_actor<accumulator_state>* self,
   s.poker = poker;
   s.start = std::chrono::high_resolution_clock::now();
   s.expected = expected;
+  s.did_stop = false;
   s.actions.emplace(action::invite, 0);
   s.actions.emplace(action::none, 0);
   s.actions.emplace(action::compute, 0);
@@ -365,7 +367,7 @@ caf::behavior accumulator(caf::stateful_actor<accumulator_state>* self,
     [=](stop_atom, const action act) {
       auto& s = self->state;
       s.actions.at(act)++;
-      s.expected--;
+      --s.expected;
       if (s.expected == 1) {
         s.end = std::chrono::high_resolution_clock::now();
         s.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -412,9 +414,12 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
                     behavior_factory factory) {
   auto& s = self->state;
   s.clients = clients;
+  s.logouts = 0;
+  s.confirmations = 0;
   s.turns = turns;
+  s.iteration = 0;
   s.runs = runs;
-  s.directories = directories;
+  s.directories = std::move(directories);
   s.factory = factory;
   s.finals.resize(s.runs, std::vector<double>(s.turns));
   s.actions.emplace(action::invite, 0);
@@ -473,7 +478,7 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
       }
     },
     [=](collect_atom, std::size_t i, std::size_t j, double duration,
-        action_map actions) {
+        const action_map& actions) {
       auto& s = self->state;
       for (auto& act : actions) {
         s.actions.at(act.first) += act.second;
@@ -539,6 +544,37 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
   };
 }
 
+struct config : caf::actor_system_config {
+  std::uint64_t run = 10;
+  std::size_t directories = 8;
+  std::uint64_t clients = 1024;
+  std::uint64_t turns = 32;
+  std::uint64_t compute = 75;
+  std::uint64_t post = 25;
+  std::uint64_t leave = 25;
+  std::uint64_t invite = 25;
+  std::uint64_t befriend = 10;
+  config() {
+    add_message_type<std::vector<std::uint8_t>>("std::vector<uint8_t>");
+    add_message_type<std::vector<double>>("std::vector<double>");
+    add_message_type<std::size_t>("size_t");
+    add_message_type<std::uint64_t>("uint64_t");
+    add_message_type<behavior_factory>("behavior_factory");
+    opt_group{custom_options_, "global"}
+      .add(run, "run,r", "The number of iterations. Defaults to 10")
+      .add(clients, "clients,c", "The number of directories. Defaults to 1024.")
+      .add(directories, "dir,d", "The number of directories. Defaults to 8.")
+      .add(turns, "turns,t", "The number of turns. Defaults to 32.")
+      .add(compute, "compute,m",
+           "The compute behavior probability. Defaults to 75.")
+      .add(post, "post,p", "The post behavior probability. Defaults to 25.")
+      .add(leave, "leave,l", "The leave behavior probability. Defaults to 25.")
+      .add(invite, "invite,d",
+           "The invite behavior probability. Defaults to 25.")
+      .add(befriend, "befriend,b", "The befriend probability. Defaults to 10.");
+  }
+};
+
 struct chatapp_state {
   chatapp_state() : name("chatapp") {
     // nop
@@ -553,18 +589,15 @@ struct chatapp_state {
 };
 
 caf::behavior chatapp(caf::stateful_actor<chatapp_state>* self,
-                      std::uint64_t run) {
+                      const std::uint64_t clients, const std::uint64_t turns,
+                      const std::uint64_t run, const std::size_t directories,
+                      const std::uint64_t compute, const std::uint64_t post,
+                      const std::uint64_t leave, const std::uint64_t invite,
+                      const std::uint64_t befriend) {
   auto& s = self->state;
-  s.clients = 1024;
-  s.turns = 20;
+  s.clients = clients;
+  s.turns = turns;
   s.run = run;
-
-  std::size_t directories = 8;
-  std::uint64_t compute = 50;
-  std::uint64_t post = 80;
-  std::uint64_t leave = 25;
-  std::uint64_t invite = 25;
-  std::uint64_t befriend = 10;
   pseudo_random rand(42);
 
   s.factory = behavior_factory(compute, post, leave, invite);
@@ -585,21 +618,10 @@ caf::behavior chatapp(caf::stateful_actor<chatapp_state>* self,
   };
 }
 
-struct config : caf::actor_system_config {
-  int run = 10;
-  config() {
-    add_message_type<std::vector<std::uint8_t>>("std::vector<uint8_t>");
-    add_message_type<std::vector<double>>("std::vector<double>");
-    add_message_type<std::size_t>("size_t");
-    add_message_type<std::uint64_t>("uint64_t");
-    add_message_type<behavior_factory>("behavior_factory");
-    opt_group{custom_options_, "global"}.add(run, "run,r",
-                                             "number of iterations");
-  }
-};
-
 void caf_main(caf::actor_system& system, const config& cfg) {
-  auto chat = system.spawn(chatapp, cfg.run);
+  auto chat = system.spawn(chatapp, cfg.clients, cfg.turns, cfg.run,
+                           cfg.directories, cfg.compute, cfg.post, cfg.leave,
+                           cfg.invite, cfg.befriend);
   caf::scoped_actor self{system};
   std::vector<double> durations;
   std::stringstream title_text;
@@ -607,7 +629,7 @@ void caf_main(caf::actor_system& system, const config& cfg) {
              << std::setw(18) << "i-median" << std::setw(18) << "i-error"
              << std::setw(18) << "i-stddev" << std::endl;
   std::cout << title_text.str();
-  for (int i = 0; i < cfg.run - 1; ++i) {
+  for (std::uint64_t i = 1; i < cfg.run; ++i) {
     caf::aout(self) << "start" << std::endl;
     auto start = std::chrono::high_resolution_clock::now();
     self->send(chat, apply_atom::value, self, false);

@@ -1,19 +1,19 @@
 #pragma once
-#include <vector>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <vector>
 
 class sample_stats {
 public:
   sample_stats(std::vector<double> samples) : samples_(std::move(samples)) {
-    //nop
+    // nop
   }
 
   double sum() {
     double s(0);
     for (std::size_t i = 0; i < samples_.size(); ++i) {
-      s+= samples_.at(i);
+      s += samples_.at(i);
     }
     return s;
   }
@@ -93,7 +93,7 @@ public:
     } else {
       for (auto& i : samples_) {
         diff = samples_.at(i) - m;
-        total+= (diff * diff * diff);
+        total += (diff * diff * diff);
       }
 
       return (total / ((samples_.size() - 1.0) * sd * sd * sd));
