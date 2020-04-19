@@ -44,6 +44,7 @@ using collect_atom = caf::atom_constant<caf::atom("collect")>;
 using apply_atom = caf::atom_constant<caf::atom("apply")>;
 using complete_atom = caf::atom_constant<caf::atom("complete")>;
 using append_atom = caf::atom_constant<caf::atom("append")>;
+using quit_atom = caf::atom_constant<caf::atom("quit")>;
 
 /// simulates extern client events for each turn
 struct behavior_factory {
@@ -152,10 +153,16 @@ caf::behavior chat(caf::stateful_actor<chat_state>* self,
         const caf::actor& accumulator) {
       self->state.members.erase(client);
       self->send(client, left_atom::value, self, did_logout, accumulator);
+      if (self->state.members.empty()) {
+        self->quit();
+      }
     },
     [=](leave_atom, const caf::actor& client, const bool did_logout) {
       self->state.members.erase(client);
       self->send(client, left_atom::value, self, did_logout);
+      if (self->state.members.empty()) {
+        self->quit();
+      }
     },
   };
 }
@@ -295,7 +302,7 @@ caf::behavior directory(caf::stateful_actor<directory_state>* self,
         }
       }
     },
-    [=](login_atom, std::uint64_t id) {
+    [=](logout_atom, std::uint64_t id) {
       self->send(self->state.clients.at(id), logout_atom::value);
     },
     [=](left_atom, std::uint64_t id) {
@@ -319,6 +326,7 @@ caf::behavior directory(caf::stateful_actor<directory_state>* self,
         self->send(client.second, logout_atom::value);
       }
     },
+    [=](quit_atom) { self->quit(); },
   };
 }
 
@@ -371,6 +379,7 @@ caf::behavior accumulator(caf::stateful_actor<accumulator_state>* self,
     [=](print_atom, const caf::actor& poker, std::size_t i, std::size_t j) {
       self->send(poker, collect_atom::value, i, j, self->state.duration,
                  self->state.actions);
+      self->quit();
     },
   };
 }
@@ -520,6 +529,10 @@ caf::behavior poker(caf::stateful_actor<poker_state>* self,
 
           self->send(s.bench, append_atom::value, title_text.str(),
                      result_text.str(), act_text.str());
+          for (auto& d : s.directories) {
+            self->send(d, quit_atom::value);
+          }
+          self->quit();
         }
       }
     },
