@@ -16,10 +16,8 @@
 enum action { post, leave, invite, compute, none };
 
 // types
-using client_map = std::unordered_map<std::uint64_t, caf::actor>;
-using friend_set = std::unordered_set<caf::actor>;
-using chat_set = std::unordered_set<caf::actor>;
-using client_set = std::unordered_set<caf::actor>;
+using client_seq = std::vector<caf::actor>;
+using chat_seq = std::vector<caf::actor>;
 using action_map = std::unordered_map<action, std::uint64_t>;
 
 // messages
@@ -109,14 +107,14 @@ struct chat_state {
   chat_state() : name("chat") {
     // nop
   }
-  client_set members;
+  client_seq members;
   std::vector<std::vector<std::uint8_t>> buffer;
   const char* name;
 };
 
 caf::behavior chat(caf::stateful_actor<chat_state>* self,
                    const caf::actor initiator) {
-  self->state.members.insert(initiator);
+  self->state.members.emplace_back(initiator);
   return {
     [=](post_atom, std::vector<std::uint8_t>& payload,
         const caf::actor& accumulator) {
@@ -135,7 +133,7 @@ caf::behavior chat(caf::stateful_actor<chat_state>* self,
     },
     [=](join_atom, const caf::actor& client, const caf::actor& accumulator) {
       auto& s = self->state;
-      s.members.insert(client);
+      s.members.emplace_back(client);
 #ifdef BENCH_NO_BUFFERED_CHATS
       self->send(accumulator, stop_atom::value, action::invite);
 #else
@@ -151,14 +149,18 @@ caf::behavior chat(caf::stateful_actor<chat_state>* self,
     },
     [=](leave_atom, const caf::actor& client, const bool did_logout,
         const caf::actor& accumulator) {
-      self->state.members.erase(client);
+      self->state.members.erase(std::remove(self->state.members.begin(),
+                                            self->state.members.end(), client),
+                                self->state.members.end());
       self->send(client, left_atom::value, self, did_logout, accumulator);
       if (self->state.members.empty()) {
         self->quit();
       }
     },
     [=](leave_atom, const caf::actor& client, const bool did_logout) {
-      self->state.members.erase(client);
+      self->state.members.erase(std::remove(self->state.members.begin(),
+                                            self->state.members.end(), client),
+                                self->state.members.end());
       self->send(client, left_atom::value, self, did_logout);
       if (self->state.members.empty()) {
         self->quit();
@@ -172,8 +174,8 @@ struct client_state {
     // nop
   }
   std::uint64_t id{};
-  friend_set friends;
-  chat_set chats;
+  client_seq friends;
+  chat_seq chats;
   caf::actor directory;
   dice_roll dice;
   pseudo_random rand;
@@ -191,12 +193,12 @@ caf::behavior client(caf::stateful_actor<client_state>* self,
 
   return {
     [=](befriend_atom, const caf::actor& client) {
-      self->state.friends.insert(client);
+      self->state.friends.emplace_back(client);
     },
     [=](logout_atom) {
       auto& s = self->state;
       if (s.chats.empty()) {
-        self->send(s.directory, left_atom::value, s.id);
+        self->send(s.directory, left_atom::value, self);
       } else {
         for (auto& chat : s.chats) {
           self->send(chat, leave_atom::value, self, true);
@@ -206,19 +208,23 @@ caf::behavior client(caf::stateful_actor<client_state>* self,
     [=](left_atom, const caf::actor& chat, const bool did_logout,
         const caf::actor& accumulator) {
       auto& s = self->state;
-      s.chats.erase(chat);
+      self->state.chats.erase(std::remove(self->state.chats.begin(),
+                                          self->state.chats.end(), chat),
+                              self->state.chats.end());
       self->send(accumulator, stop_atom::value, action::leave);
     },
     [=](left_atom, const caf::actor& chat, const bool did_logout) {
       auto& s = self->state;
-      s.chats.erase(chat);
+      self->state.chats.erase(std::remove(self->state.chats.begin(),
+                                          self->state.chats.end(), chat),
+                              self->state.chats.end());
       if (did_logout && s.chats.empty()) {
-        self->send(s.directory, left_atom::value, s.id);
+        self->send(s.directory, left_atom::value, self);
         self->quit(); // TODO aks pony about this
       }
     },
     [=](invite_atom, const caf::actor& chat, const caf::actor& accumulator) {
-      self->state.chats.insert(chat);
+      self->state.chats.emplace_back(chat);
       self->send(chat, join_atom::value, self, accumulator);
     },
     [=](forward_atom, const caf::actor& chat,
@@ -232,7 +238,7 @@ caf::behavior client(caf::stateful_actor<client_state>* self,
         next_chat = self->spawn(chat, self);
       } else {
         size_t index = s.rand.next_int(s.chats.size());
-        next_chat = *std::next(s.chats.begin(), index);
+        next_chat = s.chats.at(index);
       }
 
       switch (behavior.apply(s.dice)) {
@@ -278,7 +284,7 @@ struct directory_state {
   directory_state() : name("directory") {
     // nop
   }
-  client_map clients;
+  client_seq clients;
   pseudo_random random;
   std::uint32_t befriend{};
   bool is_poker = false;
@@ -295,27 +301,29 @@ caf::behavior directory(caf::stateful_actor<directory_state>* self,
     [=](login_atom, std::uint64_t id) {
       auto& s = self->state;
       auto new_client = self->spawn(client, id, self, s.random.next_int());
-      s.clients.emplace(id, new_client);
+      s.clients.emplace_back(new_client);
       for (auto& client : s.clients) {
         if (s.random.next_int(100) < s.befriend) {
-          self->send(client.second, befriend_atom::value, new_client);
-          self->send(new_client, befriend_atom::value, client.second);
+          self->send(client, befriend_atom::value, new_client);
+          self->send(new_client, befriend_atom::value, client);
         }
       }
     },
     [=](logout_atom, std::uint64_t id) {
       self->send(self->state.clients.at(id), logout_atom::value);
     },
-    [=](left_atom, std::uint64_t id) {
+    [=](left_atom, caf::actor& client) {
       auto& s = self->state;
-      s.clients.erase(id);
+      self->state.clients.erase(std::remove(self->state.clients.begin(),
+                                            self->state.clients.end(), client),
+                                self->state.clients.end());
       if (s.clients.empty() && s.is_poker) {
         self->send(s.poker, finished_atom::value);
       }
     },
     [=](poke_atom, behavior_factory& behavior, const caf::actor& accumulator) {
       for (auto& client : self->state.clients) {
-        self->send(client.second, act_atom::value, behavior, accumulator);
+        self->send(client, act_atom::value, behavior, accumulator);
       }
     },
     [=](disconnect_atom, caf::actor& poker) {
@@ -324,7 +332,7 @@ caf::behavior directory(caf::stateful_actor<directory_state>* self,
       s.poker = poker;
 
       for (auto& client : s.clients) {
-        self->send(client.second, logout_atom::value);
+        self->send(client, logout_atom::value);
       }
     },
     [=](quit_atom) { self->quit(); },
