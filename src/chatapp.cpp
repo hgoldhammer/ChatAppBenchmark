@@ -171,7 +171,7 @@ struct client_state {
   client_state() : name("client") {
     // nop
   }
-  std::uint64_t id;
+  std::uint64_t id{};
   friend_set friends;
   chat_set chats;
   caf::actor directory;
@@ -280,7 +280,7 @@ struct directory_state {
   }
   client_map clients;
   pseudo_random random;
-  std::uint32_t befriend;
+  std::uint32_t befriend{};
   bool is_poker = false;
   caf::actor poker;
   const char* name;
@@ -341,9 +341,9 @@ struct accumulator_state {
   time_point start;
   time_point end;
   /// time in milliseconds
-  double duration;
-  size_t expected;
-  bool did_stop;
+  double duration{};
+  size_t expected{};
+  bool did_stop{};
   const char* name;
 };
 
@@ -391,19 +391,19 @@ struct poker_state {
     // nop
   }
   action_map actions;
-  std::uint64_t clients;
-  std::size_t logouts;
-  std::size_t confirmations;
-  std::uint64_t turns;
-  std::uint64_t runs;
-  std::size_t iteration;
+  std::uint64_t clients{};
+  std::size_t logouts{};
+  std::size_t confirmations{};
+  std::uint64_t turns{};
+  std::uint64_t runs{};
+  std::size_t iteration{};
   std::vector<caf::actor> directories;
   std::vector<caf::actor> runtimes;
-  std::size_t accumulations;
+  std::size_t accumulations{};
   std::vector<std::vector<double>> finals;
-  behavior_factory factory;
+  behavior_factory factory{};
   caf::actor bench;
-  bool last;
+  bool last{};
   std::vector<double> turn_series;
   const char* name;
 };
@@ -579,11 +579,11 @@ struct chatapp_state {
   chatapp_state() : name("chatapp") {
     // nop
   }
-  std::uint64_t clients;
-  std::uint64_t turns;
-  std::uint64_t run;
+  std::uint64_t clients{};
+  std::uint64_t turns{};
+  std::uint64_t run{};
   std::vector<caf::actor> directories;
-  behavior_factory factory;
+  behavior_factory factory{};
   caf::actor poker;
   const char* name;
 };
