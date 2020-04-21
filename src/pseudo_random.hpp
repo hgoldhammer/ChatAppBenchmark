@@ -16,12 +16,11 @@ public:
     value_ = seed;
   }
 
-  std::uint32_t next_int() {
-    return next_long();
-  }
-
-  std::uint32_t next_int(int exclusive_max) {
-    return next_long() % exclusive_max;
+  std::uint32_t next_int(int exclusive_max = 0) {
+    if (exclusive_max == 0)
+      return next_long();
+    else
+      return next_long() % exclusive_max;
   }
 
   std::uint64_t next_long() {
