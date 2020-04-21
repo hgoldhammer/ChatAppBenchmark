@@ -178,7 +178,7 @@ chat(caf::stateful_actor<chat_state>* self, const caf::actor initiator) {
       self->send(client, left_atom::value, self, did_logout, accumulator);
       // TODO: Is this correct?
       if (s.members.empty()) {
-        //aout(self) << "shutting down chat" << std::endl;
+        // aout(self) << "shutting down chat" << std::endl;
         self->quit();
       }
     },
@@ -653,8 +653,10 @@ void caf_main(caf::actor_system& system, const config& cfg) {
         list_atoms();
       });
     };
-    for (uint64_t i = 1; i < cfg.run; ++i)
+    for (uint64_t i = 1; i < cfg.run; ++i) {
       perform_run(false);
+      std::this_thread::sleep_for(std::chrono::seconds{1});
+    }
     perform_run(true);
     self->receive([&](append_atom, std::string& title, std::string& result,
                       std::string& act) {
