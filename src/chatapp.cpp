@@ -59,14 +59,12 @@ using complete_atom = caf::atom_constant<caf::atom("complete")>;
 using append_atom = caf::atom_constant<caf::atom("append")>;
 using quit_atom = caf::atom_constant<caf::atom("quit")>;
 
-
 std::atomic<uint64_t> atomic_clients;
 std::atomic<uint64_t> atomic_chats;
 std::atomic<uint64_t> atomic_poker;
 std::atomic<uint64_t> atomic_directories;
 std::atomic<uint64_t> atomic_chatapp;
 std::atomic<uint64_t> atomic_accumulators;
-
 
 /// simulates extern client events for each turn
 struct behavior_factory {
@@ -178,9 +176,9 @@ chat(caf::stateful_actor<chat_state>* self, const caf::actor initiator) {
       if (itr != s.members.end())
         s.members.erase(itr);
       self->send(client, left_atom::value, self, did_logout, accumulator);
-      // TODO: Is this corrent?
-      if (self->state.members.empty()) {
-        aout(self) << "shutting down chat" << std::endl;
+      // TODO: Is this correct?
+      if (s.members.empty()) {
+        //aout(self) << "shutting down chat" << std::endl;
         self->quit();
       }
     },
@@ -219,9 +217,10 @@ caf::behavior client(caf::stateful_actor<client_state>* self, const uint64_t id,
     },
     [=](logout_atom) {
       auto& s = self->state;
-      if (s.chats.empty())
+      if (s.chats.empty()) {
         self->send(s.directory, left_atom::value, self);
-      else
+        self->quit();
+      } else
         for (auto& chat : s.chats)
           self->send(chat, leave_atom::value, self, true, caf::actor{});
     },
@@ -278,6 +277,7 @@ caf::behavior client(caf::stateful_actor<client_state>* self, const uint64_t id,
           auto invitations
             = static_cast<size_t>(s.rand.next_long() % s.friends.size());
           if (invitations == 0) {
+            s.chats.emplace_back(created);
             self->send(accumulator, stop_atom::value, action::invite);
           } else {
             self->send(accumulator, bump_atom::value, invitations);
@@ -368,7 +368,7 @@ struct accumulator_state {
 };
 
 caf::behavior accumulator(caf::stateful_actor<accumulator_state>* self,
-                          caf::actor poker, size_t expected) {
+                          const caf::actor poker, size_t expected) {
   auto& s = self->state;
   s.poker = poker;
   s.start = std::chrono::high_resolution_clock::now();
@@ -550,9 +550,7 @@ poker(caf::stateful_actor<poker_state>* self, uint64_t clients, uint64_t turns,
         }
       }
     },
-    [=](quit_atom) {
-      self->quit();
-    }
+    [=](quit_atom) { self->quit(); },
   };
 }
 
@@ -617,10 +615,9 @@ chatapp(caf::stateful_actor<chatapp_state>* self, const uint64_t clients,
     [=](quit_atom) {
       self->send(poke_actor, quit_atom::value);
       self->quit();
-    }
+    },
   };
 }
-
 
 void list_atoms() {
   std::cout << "atomic_client:      " << atomic_clients << std::endl
@@ -664,8 +661,8 @@ void caf_main(caf::actor_system& system, const config& cfg) {
       sample_stats stats(durations);
       std::stringstream result_text;
       result_text << "ChatApp" << std::string(25, ' ') << std::setw(17)
-                  << stats.mean() << " " << std::setw(17) << stats.median() << " "
-                  << std::setw(17) << stats.err() << " " << std::setw(17)
+                  << stats.mean() << " " << std::setw(17) << stats.median()
+                  << " " << std::setw(17) << stats.err() << " " << std::setw(17)
                   << stats.stddev() << " " << std::setw(17) << std::endl;
       std::cout << result_text.str();
       std::cout << title << result << act;
@@ -673,8 +670,9 @@ void caf_main(caf::actor_system& system, const config& cfg) {
     self->send(chat, quit_atom::value);
   }
   // TODO: Fix shutdown process.
+  std::this_thread::sleep_for(std::chrono::seconds{1});
   list_atoms();
-  system.await_actors_before_shutdown(false);
+  // system.await_actors_before_shutdown(false);
 }
 
 CAF_MAIN(caf::io::middleman)
