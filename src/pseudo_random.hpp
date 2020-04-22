@@ -16,12 +16,11 @@ public:
     value_ = seed;
   }
 
-  std::uint32_t next_int() {
-    return next_long();
-  }
-
-  std::uint32_t next_int(int exclusive_max) {
-    return next_long() % exclusive_max;
+  std::uint32_t next_int(int exclusive_max = 0) {
+    if (exclusive_max == 0)
+      return next_long();
+    else
+      return next_long() % exclusive_max;
   }
 
   std::uint64_t next_long() {
@@ -35,6 +34,12 @@ public:
 
   bool next_boolean() {
     return next_int(2) != 0;
+  }
+
+  template <class T>
+  void shuffle(std::vector<T>& vec) {
+    for (auto i = vec.size(); i > 0; --i)
+      std::swap(vec[i - 1], vec[next_int(i)]);
   }
 
   /// Pseudo next gaussian implemented after
