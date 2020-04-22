@@ -36,6 +36,12 @@ public:
     return next_int(2) != 0;
   }
 
+  template <class T>
+  void shuffle(std::vector<T>& vec) {
+    for (auto i = vec.size(); i > 0; --i)
+      std::swap(vec[i - 1], vec[next_int(i)]);
+  }
+
   /// Pseudo next gaussian implemented after
   /// https://docs.oracle.com/javase/7/docs/api/java/util/Random.html
   double next_gaussian() {
