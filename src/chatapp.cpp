@@ -269,15 +269,16 @@ caf::behavior client(caf::stateful_actor<client_state>* self, const uint64_t id,
           break;
         case action::invite: {
           auto created = self->spawn(chat, self);
+          s.chats.emplace_back(created);
           std::vector<caf::actor> f(s.friends.size());
           std::copy(s.friends.begin(), s.friends.end(), f.begin());
           auto rng = std::default_random_engine{s.rand.next_int()};
           std::shuffle(f.begin(), f.end(), rng);
-          f.insert(f.begin(), self);
           auto invitations
-            = static_cast<size_t>(s.rand.next_long() % s.friends.size());
+            = s.friends.size() == 0
+                ? 0
+                : static_cast<size_t>(s.rand.next_long() % s.friends.size());
           if (invitations == 0) {
-            s.chats.emplace_back(created);
             self->send(accumulator, stop_atom::value, action::invite);
           } else {
             self->send(accumulator, bump_atom::value, invitations);
@@ -655,7 +656,7 @@ void caf_main(caf::actor_system& system, const config& cfg) {
     };
     for (uint64_t i = 1; i < cfg.run; ++i) {
       perform_run(false);
-      std::this_thread::sleep_for(std::chrono::seconds{1});
+      std::this_thread::sleep_for(std::chrono::milliseconds{100});
     }
     perform_run(true);
     self->receive([&](append_atom, std::string& title, std::string& result,
