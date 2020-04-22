@@ -163,10 +163,8 @@ chat(caf::stateful_actor<chat_state>* self, const caf::actor initiator) {
         s.members.erase(itr);
       self->send(client, left_atom::value, self, did_logout, accumulator);
       // TODO: Is this correct?
-      if (s.members.empty()) {
-        // aout(self) << "shutting down chat" << std::endl;
+      if (s.members.empty())
         self->quit();
-      }
     },
   };
 }
@@ -183,8 +181,6 @@ struct client_state {
 
 caf::behavior client(caf::stateful_actor<client_state>* self, const uint64_t id,
                      const caf::actor directory, uint64_t seed) {
-  // aout(self) << "starting client with id " << id << " and seed " << seed <<
-  // std::endl;
   auto& s = self->state;
   s.id = id;
   s.directory = directory;
@@ -453,26 +449,24 @@ poker(caf::stateful_actor<poker_state>* self, uint64_t clients, uint64_t turns,
         s.actions[act.first] += act.second; // act.first += act.second;
       try {
         s.finals.at(i).at(j) = duration;
-        // Think this only happens if the first statement succeeds.
         s.turn_series.push_back(duration);
       } catch (std::exception& e) {
-        caf::aout(self) << "exception at " << i << " " << j << std::endl;
+        aout(self) << "Data collection failed to access element at i=" << i
+                   << ", j=" << j << std::endl;
       }
 
       --s.accumulations;
       if (s.accumulations == 0) {
-        caf::aout(self) << "iteration end" << std::endl;
         ++s.iteration;
         if (s.bench) {
           self->send(s.bench, complete_atom::value);
 
           if (s.last) {
-            caf::aout(self) << "start data collection" << std::endl;
             sample_stats stats(s.turn_series);
             std::vector<std::vector<double>> turns;
             std::vector<double> qos;
 
-            // TODO ask pony about line 381 to 391
+            // TODO Ask pony about line 381 to 391.
 
             for (size_t l = 0; l < s.finals.size(); ++l) {
               qos.push_back(sample_stats(s.finals.back()).stddev());
@@ -587,7 +581,6 @@ void caf_main(caf::actor_system& system, const config& cfg) {
                << std::setw(18) << "i-stddev" << std::endl;
     std::cout << title_text.str();
     auto perform_run = [&](bool collect_data) {
-      caf::aout(self) << "start" << std::endl;
       auto start = std::chrono::high_resolution_clock::now();
       self->send(chat, apply_atom::value, self, collect_data);
       self->receive([start, &durations](complete_atom) {
@@ -598,12 +591,8 @@ void caf_main(caf::actor_system& system, const config& cfg) {
         sample_stats stats(durations);
       });
     };
-    for (uint64_t i = 1; i < cfg.run; ++i) {
+    for (uint64_t i = 1; i < cfg.run; ++i)
       perform_run(false);
-      // Seems to increase the likelyhood of not ruinning into problem
-      // drastically!
-      // std::this_thread::sleep_for(std::chrono::milliseconds{100});
-    }
     perform_run(true);
     self->receive([&](append_atom, std::string& title, std::string& result,
                       std::string& act) {
