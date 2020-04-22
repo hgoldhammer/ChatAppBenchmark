@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <string>
 #include <vector>
@@ -59,13 +58,6 @@ using complete_atom = caf::atom_constant<caf::atom("complete")>;
 using append_atom = caf::atom_constant<caf::atom("append")>;
 using quit_atom = caf::atom_constant<caf::atom("quit")>;
 
-std::atomic<uint64_t> atomic_clients;
-std::atomic<uint64_t> atomic_chats;
-std::atomic<uint64_t> atomic_poker;
-std::atomic<uint64_t> atomic_directories;
-std::atomic<uint64_t> atomic_chatapp;
-std::atomic<uint64_t> atomic_accumulators;
-
 /// simulates extern client events for each turn
 struct behavior_factory {
   behavior_factory() = default;
@@ -122,12 +114,6 @@ uint64_t fibonacci(uint8_t x) {
 }
 
 struct chat_state {
-  chat_state() {
-    atomic_chats++;
-  }
-  ~chat_state() {
-    atomic_chats--;
-  }
   client_seq members;
   std::vector<payload> buffer;
   const char* name = "chat";
@@ -186,12 +172,6 @@ chat(caf::stateful_actor<chat_state>* self, const caf::actor initiator) {
 }
 
 struct client_state {
-  client_state() {
-    atomic_clients++;
-  }
-  ~client_state() {
-    atomic_clients--;
-  }
   uint64_t id;
   client_seq friends;
   chat_seq chats;
@@ -253,14 +233,14 @@ caf::behavior client(caf::stateful_actor<client_state>* self, const uint64_t id,
           if (!s.chats.empty())
             self->send(s.chats[index], post_atom::value, payload{},
                        accumulator);
-          else // TODO: Think this is what pony does, right?
+          else
             self->send(accumulator, stop_atom::value, action::none);
           break;
         case action::leave:
           if (!s.chats.empty())
             self->send(s.chats[index], leave_atom::value, self, false,
                        accumulator);
-          else // TODO: Think this is what pony does, right?
+          else
             self->send(accumulator, stop_atom::value, action::none);
           break;
         case action::compute:
@@ -272,8 +252,7 @@ caf::behavior client(caf::stateful_actor<client_state>* self, const uint64_t id,
           s.chats.emplace_back(created);
           std::vector<caf::actor> f(s.friends.size());
           std::copy(s.friends.begin(), s.friends.end(), f.begin());
-          auto rng = std::default_random_engine{s.rand.next_int()};
-          std::shuffle(f.begin(), f.end(), rng);
+          s.rand.shuffle(f);
           auto invitations
             = s.friends.size() == 0
                 ? 0
@@ -296,12 +275,6 @@ caf::behavior client(caf::stateful_actor<client_state>* self, const uint64_t id,
 }
 
 struct directory_state {
-  directory_state() {
-    atomic_directories++;
-  }
-  ~directory_state() {
-    atomic_directories--;
-  }
   client_seq clients;
   pseudo_random random;
   uint32_t befriend;
@@ -351,12 +324,6 @@ caf::behavior directory(caf::stateful_actor<directory_state>* self,
 
 using time_point = std::chrono::time_point<std::chrono::high_resolution_clock>;
 struct accumulator_state {
-  accumulator_state() {
-    atomic_accumulators++;
-  }
-  ~accumulator_state() {
-    atomic_accumulators--;
-  }
   caf::actor poker;
   action_map actions;
   time_point start;
@@ -385,7 +352,7 @@ caf::behavior accumulator(caf::stateful_actor<accumulator_state>* self,
       auto& s = self->state;
       ++s.actions[act];
       --s.expected;
-      if (s.expected == 1) {
+      if (s.expected == 0) {
         s.end = std::chrono::high_resolution_clock::now();
         s.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                        s.end - s.start)
@@ -403,12 +370,6 @@ caf::behavior accumulator(caf::stateful_actor<accumulator_state>* self,
 }
 
 struct poker_state {
-  poker_state() {
-    atomic_poker++;
-  }
-  ~poker_state() {
-    atomic_poker--;
-  }
   action_map actions;
   uint64_t clients;
   size_t logouts;
@@ -447,9 +408,8 @@ poker(caf::stateful_actor<poker_state>* self, uint64_t clients, uint64_t turns,
       s.last = last;
       s.accumulations = 0;
 
-      uint64_t turns = s.turns;
       size_t index = 0;
-      std::vector<double> values(turns, 0);
+      std::vector<double> values(s.turns, 0);
 
       s.finals.emplace_back(std::move(values));
 
@@ -458,7 +418,7 @@ poker(caf::stateful_actor<poker_state>* self, uint64_t clients, uint64_t turns,
         self->send(s.directories[index], login_atom::value, client);
       }
       // feedback loop?
-      for (turns = turns - 1; turns > 0; --turns) {
+      for (uint64_t i = 0; i < s.turns; ++i) {
         auto accu
           = self->spawn(accumulator, self, static_cast<size_t>(s.clients));
         for (auto& directory : s.directories)
@@ -469,14 +429,14 @@ poker(caf::stateful_actor<poker_state>* self, uint64_t clients, uint64_t turns,
     [=](confirm_atom) {
       auto& s = self->state;
       --s.confirmations;
-      if (s.confirmations == 1)
+      if (s.confirmations == 0)
         for (auto& d : s.directories)
           self->send(d, disconnect_atom::value, self);
     },
     [=](finished_atom) {
       auto& s = self->state;
       --s.logouts;
-      if (s.logouts == 1) {
+      if (s.logouts == 0) {
         size_t turn = 0;
         for (auto& accumulator : s.runtimes) {
           ++s.accumulations;
@@ -500,7 +460,7 @@ poker(caf::stateful_actor<poker_state>* self, uint64_t clients, uint64_t turns,
       }
 
       --s.accumulations;
-      if (s.accumulations == 1) {
+      if (s.accumulations == 0) {
         caf::aout(self) << "iteration end" << std::endl;
         ++s.iteration;
         if (s.bench) {
@@ -556,7 +516,7 @@ poker(caf::stateful_actor<poker_state>* self, uint64_t clients, uint64_t turns,
 }
 
 struct config : caf::actor_system_config {
-  uint64_t run = 10;
+  uint64_t run = 32;
   size_t directories = 8;
   uint64_t clients = 1024;
   uint64_t turns = 32;
@@ -572,7 +532,7 @@ struct config : caf::actor_system_config {
     add_message_type<uint64_t>("uint64_t");
     add_message_type<behavior_factory>("behavior_factory");
     opt_group{custom_options_, "global"}
-      .add(run, "run,r", "The number of iterations. Defaults to 10")
+      .add(run, "run,r", "The number of iterations. Defaults to 32")
       .add(clients, "clients,c", "The number of directories. Defaults to 1024.")
       .add(directories, "dir,d", "The number of directories. Defaults to 8.")
       .add(turns, "turns,t", "The number of turns. Defaults to 32.")
@@ -588,12 +548,6 @@ struct config : caf::actor_system_config {
 };
 
 struct chatapp_state {
-  chatapp_state() {
-    atomic_chatapp++;
-  }
-  ~chatapp_state() {
-    atomic_chatapp--;
-  }
   const char* name = "chatapp";
 };
 
@@ -620,15 +574,6 @@ chatapp(caf::stateful_actor<chatapp_state>* self, const uint64_t clients,
   };
 }
 
-void list_atoms() {
-  std::cout << "atomic_client:      " << atomic_clients << std::endl
-            << "atomic_chats:       " << atomic_chats << std::endl
-            << "atomic_poker:       " << atomic_poker << std::endl
-            << "atomic_directories: " << atomic_directories << std::endl
-            << "atomic_chatapp:     " << atomic_chatapp << std::endl
-            << "atomic_accumulators:" << atomic_accumulators << std::endl;
-}
-
 void caf_main(caf::actor_system& system, const config& cfg) {
   {
     auto chat = system.spawn(chatapp, cfg.clients, cfg.turns, cfg.directories,
@@ -651,12 +596,13 @@ void caf_main(caf::actor_system& system, const config& cfg) {
           std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
             .count());
         sample_stats stats(durations);
-        list_atoms();
       });
     };
     for (uint64_t i = 1; i < cfg.run; ++i) {
       perform_run(false);
-      std::this_thread::sleep_for(std::chrono::milliseconds{100});
+      // Seems to increase the likelyhood of not ruinning into problem
+      // drastically!
+      // std::this_thread::sleep_for(std::chrono::milliseconds{100});
     }
     perform_run(true);
     self->receive([&](append_atom, std::string& title, std::string& result,
@@ -672,10 +618,6 @@ void caf_main(caf::actor_system& system, const config& cfg) {
     });
     self->send(chat, quit_atom::value);
   }
-  // TODO: Fix shutdown process.
-  std::this_thread::sleep_for(std::chrono::seconds{1});
-  list_atoms();
-  // system.await_actors_before_shutdown(false);
 }
 
 CAF_MAIN(caf::io::middleman)
