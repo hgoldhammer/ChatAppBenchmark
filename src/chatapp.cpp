@@ -250,7 +250,7 @@ caf::behavior client(caf::stateful_actor<client_state>* self, const uint64_t id,
           std::copy(s.friends.begin(), s.friends.end(), f.begin());
           s.rand.shuffle(f);
           auto invitations
-            = s.friends.size() == 0
+            = s.friends.empty()
                 ? 0
                 : static_cast<size_t>(s.rand.next_long() % s.friends.size());
           if (invitations == 0) {
@@ -385,15 +385,19 @@ struct poker_state {
 
 caf::behavior
 poker(caf::stateful_actor<poker_state>* self, uint64_t clients, uint64_t turns,
-      std::vector<caf::actor> directories, behavior_factory factory) {
+      size_t directories, uint64_t befriend, behavior_factory factory) {
   auto& s = self->state;
   s.clients = clients;
   s.logouts = 0;
   s.confirmations = 0;
   s.turns = turns;
   s.iteration = 0;
-  s.directories = std::move(directories);
   s.factory = factory;
+
+  auto rand = pseudo_random(42);
+  for (size_t i = 0; i < directories; ++i)
+    s.directories.emplace_back(
+      self->spawn(directory, rand.next_int(), befriend));
   self->set_default_handler(caf::print_and_drop);
   return {
     [=](apply_atom, caf::actor& bench, bool last) {
@@ -547,15 +551,12 @@ struct chatapp_state {
 
 caf::behavior
 chatapp(caf::stateful_actor<chatapp_state>* self, const uint64_t clients,
-        const uint64_t turns, const size_t num_directories,
-        const uint64_t compute, const uint64_t post, const uint64_t leave,
-        const uint64_t invite, const uint64_t befriend) {
-  pseudo_random rand(42);
+        const uint64_t turns, const size_t directories, const uint64_t compute,
+        const uint64_t post, const uint64_t leave, const uint64_t invite,
+        const uint64_t befriend) {
   auto factory = behavior_factory(compute, post, leave, invite);
-  std::vector<caf::actor> directories;
-  for (size_t i = 0; i < num_directories; ++i)
-    directories.emplace_back(self->spawn(directory, rand.next_int(), befriend));
-  auto poke_actor = self->spawn(poker, clients, turns, directories, factory);
+  auto poke_actor
+    = self->spawn(poker, clients, turns, directories, befriend, factory);
   return {
     [=](apply_atom, caf::actor& async_benchmark_completion, bool last) {
       self->send(poke_actor, apply_atom::value, async_benchmark_completion,
