@@ -64,7 +64,10 @@ struct behavior_factory {
 
   behavior_factory(uint32_t compute, uint32_t post, uint32_t leave,
                    uint32_t invite)
-    : _compute(compute), _post(_compute + post), _leave(_post + leave), _invite(_leave + invite) {
+    : _compute(compute),
+      _post(_compute + post),
+      _leave(_post + leave),
+      _invite(_leave + invite) {
     // nop
   }
 
@@ -92,8 +95,8 @@ struct behavior_factory {
 
 template <class Inspector>
 typename Inspector::result_type inspect(Inspector& f, behavior_factory& x) {
-  return f(caf::meta::type_name("behavior_factory"), x._compute, x._post, x._leave,
-           x._invite);
+  return f(caf::meta::type_name("behavior_factory"), x._compute, x._post,
+           x._leave, x._invite);
 }
 
 /// for clients compute turn
@@ -533,7 +536,8 @@ struct config : caf::actor_system_config {
     opt_group{custom_options_, "global"}
       .add(run, "run,r", "The number of iterations. Defaults to 32")
       .add(clients, "clients,c", "The number of clients. Defaults to 1024.")
-      .add(directories, "directories,d", "The number of directories. Defaults to 8.")
+      .add(directories, "directories,d",
+           "The number of directories. Defaults to 8.")
       .add(turns, "turns,t", "The number of turns. Defaults to 32.")
       .add(compute, "compute,m",
            "The compute behavior probability. Defaults to 55.")
