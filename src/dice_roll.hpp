@@ -13,8 +13,8 @@ public:
     // nop
   }
 
-  bool apply(std::uint64_t probability) {
-    return random_.next_int(100) < static_cast<std::uint32_t>(probability);
+  uint32_t apply() {
+    return random_.next_int(100);
   }
 
 private:

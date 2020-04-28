@@ -62,37 +62,38 @@ using quit_atom = caf::atom_constant<caf::atom("quit")>;
 struct behavior_factory {
   behavior_factory() = default;
 
-  behavior_factory(uint64_t compute, uint64_t post, uint64_t leave,
-                   uint64_t invite)
-    : compute(compute), post(post), leave(leave), invite(invite) {
+  behavior_factory(uint32_t compute, uint32_t post, uint32_t leave,
+                   uint32_t invite)
+    : _compute(compute), _post(_compute + post), _leave(_post + leave), _invite(_leave + invite) {
     // nop
   }
 
   behavior_factory(const behavior_factory& f) = default;
 
   action apply(dice_roll dice) const {
+    auto pick = dice.apply();
     auto next_action = action::none;
-    if (dice.apply(compute))
+    if (pick < _compute)
       next_action = action::compute;
-    else if (dice.apply(post))
+    else if (pick < _post)
       next_action = action::post;
-    else if (dice.apply(leave))
+    else if (pick < _leave)
       next_action = action::leave;
-    else if (dice.apply(invite))
+    else if (pick < _invite)
       next_action = action::invite;
     return next_action;
   }
 
-  uint64_t compute;
-  uint64_t post;
-  uint64_t leave;
-  uint64_t invite;
+  uint32_t _compute;
+  uint32_t _post;
+  uint32_t _leave;
+  uint32_t _invite;
 };
 
 template <class Inspector>
 typename Inspector::result_type inspect(Inspector& f, behavior_factory& x) {
-  return f(caf::meta::type_name("behavior_factory"), x.compute, x.post, x.leave,
-           x.invite);
+  return f(caf::meta::type_name("behavior_factory"), x._compute, x._post, x._leave,
+           x._invite);
 }
 
 /// for clients compute turn
@@ -518,10 +519,10 @@ struct config : caf::actor_system_config {
   size_t directories = 8;
   uint64_t clients = 1024;
   uint64_t turns = 32;
-  uint64_t compute = 75;
+  uint64_t compute = 55;
   uint64_t post = 25;
-  uint64_t leave = 25;
-  uint64_t invite = 25;
+  uint64_t leave = 10;
+  uint64_t invite = 10;
   uint64_t befriend = 10;
   config() {
     add_message_type<std::vector<uint8_t>>("std::vector<uint8_t>");
@@ -531,15 +532,15 @@ struct config : caf::actor_system_config {
     add_message_type<behavior_factory>("behavior_factory");
     opt_group{custom_options_, "global"}
       .add(run, "run,r", "The number of iterations. Defaults to 32")
-      .add(clients, "clients,c", "The number of directories. Defaults to 1024.")
-      .add(directories, "dir,d", "The number of directories. Defaults to 8.")
+      .add(clients, "clients,c", "The number of clients. Defaults to 1024.")
+      .add(directories, "directories,d", "The number of directories. Defaults to 8.")
       .add(turns, "turns,t", "The number of turns. Defaults to 32.")
       .add(compute, "compute,m",
-           "The compute behavior probability. Defaults to 75.")
+           "The compute behavior probability. Defaults to 55.")
       .add(post, "post,p", "The post behavior probability. Defaults to 25.")
-      .add(leave, "leave,l", "The leave behavior probability. Defaults to 25.")
+      .add(leave, "leave,l", "The leave behavior probability. Defaults to 10.")
       .add(invite, "invite,d",
-           "The invite behavior probability. Defaults to 25.")
+           "The invite behavior probability. Defaults to 10.")
       .add(befriend, "befriend,b", "The befriend probability. Defaults to 10.");
     // TODO: What about the parseable opt?
   }
@@ -570,7 +571,10 @@ chatapp(caf::stateful_actor<chatapp_state>* self, const uint64_t clients,
 }
 
 void caf_main(caf::actor_system& system, const config& cfg) {
-  {
+  if ((cfg.compute + cfg.post + cfg.leave + cfg.invite) != 100) {
+    std::cerr << "Invalid arguments! Sum of probabilities != 100." << std::endl;
+    return;
+  } else {
     auto chat = system.spawn(chatapp, cfg.clients, cfg.turns, cfg.directories,
                              cfg.compute, cfg.post, cfg.leave, cfg.invite,
                              cfg.befriend);
